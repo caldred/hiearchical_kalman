@@ -119,7 +119,27 @@ $$y = s_i + \epsilon, \quad \epsilon \sim N(0, R_i)$$
 
 The filter computes the optimal update to our belief about $z_t$ given this observation.
 
-### 3.3 Learning the Parameters
+### 3.3 Uncertainty Bounds: Capping at Population Variance
+
+A key insight of this implementation is that **uncertainty should never exceed the population variance**. If we haven't observed a player in a long time, we become increasingly uncertain about their skill—but our uncertainty cannot exceed that of knowing nothing about them at all (i.e., treating them as a random member of the population).
+
+**The problem with standard Kalman filters**: In the standard prediction step, uncertainty grows without bound:
+$$P_{t|t-1} = P_{t-1|t-1} + Q$$
+
+After enough time without observations, $P$ could exceed the population variance $P_{pop}$, which is conceptually impossible.
+
+**Our solution**: We implement an asymptotic decay model where uncertainty approaches but never reaches $P_{pop}$:
+
+$$P_{pred} = P_{pop} - \text{decay} \cdot (P_{pop} - P_{prev})$$
+
+The decay rate is driven by the process noise $Q$: larger Q causes faster approach to the population variance. A minimum "headroom" (0.1% of $P_{pop}$) is maintained so that P never fully reaches $P_{pop}$—preserving some individual identity even after very long gaps.
+
+**Benefits**:
+- Uncertainty is always bounded and interpretable
+- Players who haven't been observed for a long time naturally regress toward population priors
+- Numerical stability is improved (no unbounded covariance growth)
+
+### 3.4 Learning the Parameters
 
 The model learns from data using the Expectation-Maximization (EM) algorithm:
 
@@ -364,9 +384,15 @@ where:
 
 ### A.2 Kalman Filter Equations
 
-**Predict**:
+**Predict** (with asymptotic uncertainty cap):
 $$\hat{z}_{t|t-1} = \hat{z}_{t-1|t-1}$$
-$$P_{t|t-1} = P_{t-1|t-1} + Q$$
+
+The covariance update uses an asymptotic model that caps uncertainty at the population variance $P_{pop}$:
+$$\text{headroom}_t = P_{pop} - P_{t-1|t-1}$$
+$$\text{decay} = \exp(-Q / \text{headroom}_t)$$
+$$P_{t|t-1} = P_{pop} - \max(\text{headroom}_t \cdot \text{decay}, \, 0.001 \cdot P_{pop})$$
+
+This ensures $P$ asymptotes toward but never exceeds $P_{pop}$.
 
 **Update**:
 $$\tilde{y}_t = y_t - C_t B \hat{z}_{t|t-1}$$
@@ -394,4 +420,5 @@ $$P_{t|T} = P_{t|t} + J_t (P_{t+1|T} - P_{t+1|t}) J_t^T$$
 - **Observation noise**: How noisy a single measurement is
 - **Kalman gain**: The weight given to new observations vs. the prior prediction
 - **Smoothing**: Using future observations to refine past estimates (for parameter learning)
+- **Population variance (P_pop)**: The covariance of skills across the population; serves as the upper bound for individual uncertainty
 

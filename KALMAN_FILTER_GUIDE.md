@@ -147,12 +147,27 @@ In plain English:
 When we move to a new time period, we first predict where we think the state is:
 
 ```python
-# From kalman.py - the predict step
+# From kalman.py - the predict step (simplified)
 z_pred = z_prev           # Predicted state (random walk: stays the same)
-P_pred = P_prev + Q       # Predicted covariance (uncertainty grows!)
+P_pred = P_prev + Q       # Standard: uncertainty grows without bound
 ```
 
 **Why does uncertainty grow?** Because time passing means more random drift could have occurred. It's like predicting where a wandering person will be—the further into the future, the less certain we are.
+
+**But there's a catch!** In a standard Kalman filter, uncertainty can grow without bound. This doesn't make sense: if we haven't seen a player for 5 years, our uncertainty shouldn't exceed "knowing nothing about them."
+
+This codebase implements an **asymptotic uncertainty cap**:
+
+```python
+# From kalman.py - actual predict step with uncertainty cap
+if P_pop is not None:
+    # Uncertainty approaches but never exceeds population variance
+    P_pred = asymptotic_predict(P_prev, Q, P_pop)
+else:
+    P_pred = P_prev + Q  # Standard behavior
+```
+
+The uncertainty asymptotes toward the population variance `P_pop` but never reaches it—preserving some individual identity even after long gaps without observations.
 
 ### The Update Step
 
@@ -633,6 +648,27 @@ def _validate_dag(self):
     # Uses three-color DFS: WHITE (unvisited), GRAY (in progress), BLACK (done)
     # If we revisit a GRAY node, there's a cycle!
 ```
+
+### 7. Uncertainty Bounds and Population Variance
+
+This codebase caps uncertainty at the population variance—a key design choice:
+
+```python
+# Uncertainty can never exceed population variance
+# After long gaps, players regress toward the population prior
+
+P_max = P_pop * 0.999  # Asymptotic limit (99.9% of population variance)
+```
+
+**Why this matters**:
+- Without bounds, P can grow arbitrarily large, causing numerical issues
+- Conceptually, uncertainty about a player can't exceed "knowing nothing about them"
+- Players with long observation gaps naturally regress toward population averages
+
+**The asymptotic model**: Rather than hard-capping, uncertainty decays exponentially toward `P_pop`:
+- Small Q → slow approach to population variance
+- Large Q → fast approach to population variance
+- A minimum "headroom" of 0.1% is always maintained
 
 ---
 
